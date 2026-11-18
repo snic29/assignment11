@@ -118,3 +118,17 @@ def divide(a: Number, b: Number) -> float:
     # Perform division of a by b and return the result as a float
     result = a / b
     return result
+
+
+def calculate(a: Number, b: Number, operation_type: str) -> Number:
+    """Dispatch an arithmetic operation by its calculation type."""
+    operations = {
+        "add": add,
+        "sub": subtract,
+        "multiply": multiply,
+        "divide": divide,
+    }
+    operation = operations.get(operation_type.casefold())
+    if operation is None:
+        raise ValueError(f"Unsupported calculation type: {operation_type}")
+    return operation(a, b)

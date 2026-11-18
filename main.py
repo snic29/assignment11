@@ -1,11 +1,17 @@
 # main.py
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, field_validator  # Use @validator for Pydantic 1.x
 from fastapi.exceptions import RequestValidationError
-from app.operations import add, subtract, multiply, divide  # Ensure correct import path
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
+
+from app.database import get_db
+from app.models.calculation import Calculation
+from app.operations import add, calculate, divide, multiply, subtract
+from app.schemas.calculation import CalculationCreate, CalculationRead
 import uvicorn
 import logging
 
@@ -56,12 +62,52 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         content={"error": error_messages},
     )
 
+@app.post(
+    "/calculations",
+    response_model=CalculationRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_calculation(
+    calculation_data: CalculationCreate,
+    db: Session = Depends(get_db),
+):
+    operation_type = calculation_data.type.value
+    try:
+        result = calculate(
+            calculation_data.a, calculation_data.b, operation_type
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    calculation = Calculation(
+        a=calculation_data.a,
+        b=calculation_data.b,
+        type=operation_type,
+        result=result,
+    )
+    try:
+        db.add(calculation)
+        db.commit()
+        db.refresh(calculation)
+    except SQLAlchemyError as exc:
+        db.rollback()
+        logger.exception("Failed to save calculation")
+        raise HTTPException(
+            status_code=500, detail="Failed to save calculation"
+        ) from exc
+    return calculation
+
 @app.get("/")
 async def read_root(request: Request):
     """
     Serve the index.html template.
     """
     return templates.TemplateResponse("index.html", {"request": request})
+
+@app.get("/health")
+async def health_check():
+    """Provide a lightweight health endpoint for container orchestration."""
+    return {"status": "ok"}
 
 @app.post("/add", response_model=OperationResponse, responses={400: {"model": ErrorResponse}})
 async def add_route(operation: OperationRequest):
